@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>正方形Kの回転体 K_x と K_y の可視化</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<style>
+  body{margin:0;overflow:hidden;background:#15161c;color:#eee;font-family:"Hiragino Sans","Meiryo",sans-serif}
+  #panel{position:absolute;top:10px;left:10px;width:320px;background:rgba(30,32,44,.92);padding:12px 14px;border-radius:10px;font-size:13px;line-height:1.7;max-height:94vh;overflow:auto}
+  #panel h2{font-size:16px;margin:0 0 6px}
+  #panel label{display:block;cursor:pointer}
+  #panel input[type=range]{width:100%}
+  .row{margin:8px 0;padding-top:6px;border-top:1px solid #444}
+  button{background:#3b5bdb;color:#fff;border:none;padding:5px 12px;border-radius:5px;cursor:pointer;margin-right:4px}
+  button:hover{background:#4c6ef5}
+  .kx{color:#ff6b6b;font-weight:bold}.ky{color:#4dabf7;font-weight:bold}.ki{color:#ffd43b;font-weight:bold}
+  .katex{font-size:1.05em}
+  .note{font-size:11px;color:#aaa}
+  #sec{position:absolute;right:10px;bottom:10px;background:rgba(30,32,44,.92);padding:10px;border-radius:10px;font-size:13px;line-height:1.8;display:none}
+  #sec canvas{background:#0e0f14;border-radius:6px;display:block;margin:4px 0}
+</style>
+<script type="importmap">
+{"imports":{
+  "three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<div id="panel">
+  <h2>正方形 <span class="tex">K</span> の回転体</h2>
+  <div><span class="tex">A(0,0,0),\ B(1,0,0),\ C(1,1,0),\ D(0,1,0)</span></div>
+
+  <div class="row">
+    <b>回転角 <span class="tex">\theta</span> = <span id="thv">360</span>°</b>
+    <input type="range" id="theta" min="0" max="360" value="360">
+    <button id="play">▶ 回転アニメ</button><button id="reset">0°に戻す</button>
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="showK" checked> 正方形 <span class="tex">K</span></label>
+    <label><input type="checkbox" id="showKx" checked> <span class="kx tex">K_x</span>（<span class="tex">x</span> 軸まわり）</label>
+    <label><input type="checkbox" id="showKy" checked> <span class="ky tex">K_y</span>（<span class="tex">y</span> 軸まわり）</label>
+    <label><input type="checkbox" id="showI"> <span class="ki">共通部分 <span class="tex">K_x \cap K_y</span></span></label>
+    <label><input type="checkbox" id="showSec"> 平面 <span class="tex">z = t</span> による断面</label>
+  </div>
+
+  <div class="row">
+    不透明度：<input type="range" id="op" min="5" max="100" value="35">
+    断面の高さ <span class="tex">t</span> = <span id="tv">0.00</span>
+    <input type="range" id="t" min="-100" max="100" value="0">
+    <div class="note">※ 断面は回転し終えた（360°）立体のものです</div>
+  </div>
+
+  <div class="row">
+    <span class="kx tex">K_x</span>：<span class="tex">y^2+z^2 \le 1,\ 0 \le x \le 1</span><br>
+    <span class="ky tex">K_y</span>：<span class="tex">x^2+z^2 \le 1,\ 0 \le y \le 1</span><br>
+    <span class="tex">V(K_x) = V(K_y) = \pi</span><br>
+    <span class="ki tex">V(K_x \cap K_y)</span> <span class="tex">= \int_{-1}^{1} (1-t^2)\,dt = \dfrac{4}{3}</span><br>
+    <span class="tex">V(K_x \cup K_y) = 2\pi - \dfrac{4}{3} \approx</span> <span id="vu"></span>
+  </div>
+</div>
+
+<div id="sec">
+  <b>平面 <span class="tex">z = t</span> での断面（上から見た図）</b>
+  <canvas id="cv" width="280" height="280"></canvas>
+  <div id="area"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------- KaTeX ヘルパー ----------
+const hasKatex = typeof window.katex !== 'undefined';
+const tex = s => hasKatex ? katex.renderToString(s, { throwOnError: false }) : s;
+if (hasKatex) {
+  document.querySelectorAll('.tex').forEach(el =>
+    katex.render(el.textContent, el, { throwOnError: false }));
+}
+
+// ---------- 基本セットアップ ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x15161c);
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 100);
+camera.up.set(0, 0, 1);                 // z軸を上に
+camera.position.set(3.6, 2.6, 2.4);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0.3, 0.3, 0);
+controls.update();
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const d1 = new THREE.DirectionalLight(0xffffff, 0.9); d1.position.set(3, 2, 4); scene.add(d1);
+const d2 = new THREE.DirectionalLight(0xffffff, 0.4); d2.position.set(-3, -2, -3); scene.add(d2);
+
+const COL = { kx: 0xff6b6b, ky: 0x4dabf7, ki: 0xffd43b, k: 0x51cf66 };
+
+// ---------- ヘルパー ----------
+function paramGeo(f, nu, nv) {
+  const pos = [], idx = [];
+  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+    const p = f(i / nu, j / nv); pos.push(p[0], p[1], p[2]);
+  }
+  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+    const a = j * (nu + 1) + i, b = a + 1, c = a + nu + 1, d = c + 1;
+    idx.push(a, b, d, a, d, c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+function line(pts, color) {
+  const g = new THREE.BufferGeometry().setFromPoints(pts.map(p => new THREE.Vector3(...p)));
+  return new THREE.Line(g, new THREE.LineBasicMaterial({ color }));
+}
+function label(text, pos, color = '#ffffff') {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.font = 'italic bold 42px "Times New Roman", serif'; ctx.fillStyle = color;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 64, 32);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
+  s.position.set(...pos); s.scale.set(0.32, 0.16, 1); scene.add(s); return s;
+}
+function solidMat(color, opacity) {
+  const m = new THREE.MeshPhongMaterial({
+    color, transparent: opacity < 1, opacity, side: THREE.DoubleSide,
+    depthWrite: opacity >= 1, shininess: 40
+  });
+  m.userData.shared = true; return m;
+}
+function disposeGroup(g) {
+  if (!g) return;
+  scene.remove(g);
+  g.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material && !o.material.userData.shared) o.material.dispose();
+  });
+}
+
+// ---------- 座標軸・ラベル ----------
+scene.add(line([[-1.6, 0, 0], [1.8, 0, 0]], 0xaaaaaa));
+scene.add(line([[0, -1.6, 0], [0, 1.8, 0]], 0xaaaaaa));
+scene.add(line([[0, 0, -1.5], [0, 0, 1.6]], 0xaaaaaa));
+label('x', [1.95, 0, 0]); label('y', [0, 1.95, 0]); label('z', [0, 0, 1.75]);
+label('A', [-0.1, -0.1, 0.05], '#9f9'); label('B', [1.1, -0.1, 0.05], '#9f9');
+label('C', [1.1, 1.1, 0.05], '#9f9');   label('D', [-0.1, 1.1, 0.05], '#9f9');
+
+// 正方形 K
+const gK = new THREE.Group();
+gK.add(new THREE.Mesh(paramGeo((u, v) => [u, v, 0], 1, 1), solidMat(COL.k, 0.7)));
+gK.add(line([[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,0]], COL.k));
+scene.add(gK);
+
+// ---------- 回転体（角度 Phi まで掃いた部分） ----------
+// axis='x': 軸方向座標 a=x, 半径 r=y  → (a, r cosφ, r sinφ)
+// axis='y': 軸方向座標 a=y, 半径 r=x  → (r cosφ, a, −r sinφ)
+function rot(axis, a, r, phi) {
+  return axis === 'x'
+    ? [a, r * Math.cos(phi), r * Math.sin(phi)]
+    : [r * Math.cos(phi), a, -r * Math.sin(phi)];
+}
+const matKx = solidMat(COL.kx, 0.35), matKy = solidMat(COL.ky, 0.35);
+
+function buildSweep(axis, Phi, mat, color) {
+  const g = new THREE.Group();
+  if (Phi > 1e-4) {
+    const n = Math.max(2, Math.ceil(120 * Phi / (2 * Math.PI)));
+    g.add(new THREE.Mesh(paramGeo((u, v) => rot(axis, u, 1, v * Phi), 1, n), mat)); // 側面
+    g.add(new THREE.Mesh(paramGeo((u, v) => rot(axis, 0, u, v * Phi), 1, n), mat)); // 底面
+    g.add(new THREE.Mesh(paramGeo((u, v) => rot(axis, 1, u, v * Phi), 1, n), mat)); // 上面
+    for (const a of [0, 1]) {                                                         // 輪郭線
+      const pts = [];
+      for (let k = 0; k <= n; k++) pts.push(rot(axis, a, 1, Phi * k / n));
+      g.add(line(pts, color));
+    }
+  }
+  // 回転中の正方形
+  if (Phi < 2 * Math.PI - 1e-4) {
+    const sq = new THREE.Mesh(paramGeo((u, v) => rot(axis, u, v, Phi), 1, 1),
+      new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide }));
+    g.add(sq);
+    g.add(line([rot(axis,0,0,Phi), rot(axis,1,0,Phi), rot(axis,1,1,Phi), rot(axis,0,1,Phi), rot(axis,0,0,Phi)], 0xffffff));
+  }
+  return g;
+}
+
+// ---------- 共通部分 ----------
+// 0≤x≤1, 0≤y≤1, |z| ≤ √(1−max(x,y)²)
+const matI = solidMat(COL.ki, 1);
+function buildInter() {
+  const g = new THREE.Group(), N = 60;
+  for (const s of [1, -1]) {
+    g.add(new THREE.Mesh(paramGeo((u, v) => { const x = u, y = v * u; return [x, y, s * Math.sqrt(Math.max(0, 1 - x * x))]; }, N, N), matI));
+    g.add(new THREE.Mesh(paramGeo((u, v) => { const y = u, x = v * u; return [x, y, s * Math.sqrt(Math.max(0, 1 - y * y))]; }, N, N), matI));
+  }
+  g.add(new THREE.Mesh(paramGeo((u, v) => [0, u, (2 * v - 1) * Math.sqrt(Math.max(0, 1 - u * u))], N, 20), matI)); // x=0 の面
+  g.add(new THREE.Mesh(paramGeo((u, v) => [u, 0, (2 * v - 1) * Math.sqrt(Math.max(0, 1 - u * u))], N, 20), matI)); // y=0 の面
+  for (const s of [1, -1]) {                                                                                         // 稜線 x=y
+    const pts = []; for (let k = 0; k <= 60; k++) { const x = k / 60; pts.push([x, x, s * Math.sqrt(1 - x * x)]); }
+    g.add(line(pts, 0x996c00));
+  }
+  return g;
+}
+const gI = buildInter(); gI.visible = false; scene.add(gI);
+
+// ---------- 状態 ----------
+const state = { theta: 360, showK: true, showKx: true, showKy: true, showI: false, showSec: false, t: 0, playing: false };
+let gKx = null, gKy = null, gSec = null;
+
+// ---------- 断面 ----------
+function buildSec(t) {
+  const g = new THREE.Group(), w = Math.sqrt(Math.max(0, 1 - t * t)), z = t;
+  const rect = (x0, x1, y0, y1, color, op, dz) => {
+    g.add(new THREE.Mesh(paramGeo((u, v) => [x0 + (x1 - x0) * u, y0 + (y1 - y0) * v, z + dz], 1, 1),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false })));
+    g.add(line([[x0,y0,z+dz],[x1,y0,z+dz],[x1,y1,z+dz],[x0,y1,z+dz],[x0,y0,z+dz]], color));
+  };
+  g.add(line([[-1.5,-1.5,z],[1.5,-1.5,z],[1.5,1.5,z],[-1.5,1.5,z],[-1.5,-1.5,z]], 0x888888));
+  if (w > 0) {
+    if (state.showKx) rect(0, 1, -w, w, COL.kx, 0.45, 0);
+    if (state.showKy) rect(-w, w, 0, 1, COL.ky, 0.45, 0.002);
+    rect(0, w, 0, w, COL.ki, 0.85, 0.004);
+  }
+  return g;
+}
+
+function draw2D() {
+  const cv = document.getElementById('cv'), c = cv.getContext('2d'), W = cv.width;
+  const S = W / 2.8, O = W / 2, X = x => O + x * S, Y = y => O - y * S;
+  const t = state.t, w = Math.sqrt(Math.max(0, 1 - t * t));
+  c.clearRect(0, 0, W, W);
+  c.strokeStyle = '#555'; c.beginPath(); c.moveTo(0, O); c.lineTo(W, O); c.moveTo(O, 0); c.lineTo(O, W); c.stroke();
+  c.fillStyle = '#aaa'; c.font = 'italic 14px "Times New Roman", serif'; c.fillText('x', W - 12, O - 4); c.fillText('y', O + 4, 14);
+  const fr = (x0, x1, y0, y1, col) => { c.fillStyle = col; c.fillRect(X(x0), Y(y1), (x1 - x0) * S, (y1 - y0) * S); };
+  if (state.showKx) fr(0, 1, -w, w, 'rgba(255,107,107,0.45)');
+  if (state.showKy) fr(-w, w, 0, 1, 'rgba(77,171,247,0.45)');
+  fr(0, w, 0, w, 'rgba(255,212,59,0.9)');
+  c.strokeStyle = '#51cf66'; c.strokeRect(X(0), Y(1), S, S); // 元の正方形 K の位置
+
+  const sx = 2 * w, si = w * w, su = 4 * w - w * w;
+  document.getElementById('area').innerHTML =
+    `${tex('\\sqrt{1-t^2} = ' + w.toFixed(3))}<br>` +
+    `<span class="kx">${tex('K_x')}</span> 断面積 ${tex('2\\sqrt{1-t^2} = ' + sx.toFixed(3))}<br>` +
+    `<span class="ky">${tex('K_y')}</span> 断面積 ${tex('2\\sqrt{1-t^2} = ' + sx.toFixed(3))}<br>` +
+    `<span class="ki">共通部分</span> ${tex('1-t^2 = ' + si.toFixed(3))}<br>` +
+    `和集合 ${tex('4\\sqrt{1-t^2}-(1-t^2) = ' + su.toFixed(3))}`;
+}
+
+// ---------- 更新 ----------
+function rebuildSweep() {
+  disposeGroup(gKx); disposeGroup(gKy);
+  const Phi = state.theta * Math.PI / 180;
+  gKx = buildSweep('x', Phi, matKx, COL.kx); gKx.visible = state.showKx; scene.add(gKx);
+  gKy = buildSweep('y', Phi, matKy, COL.ky); gKy.visible = state.showKy; scene.add(gKy);
+}
+function rebuildSec() {
+  disposeGroup(gSec); gSec = null;
+  document.getElementById('sec').style.display = state.showSec ? 'block' : 'none';
+  if (state.showSec) { gSec = buildSec(state.t); scene.add(gSec); draw2D(); }
+}
+
+const $ = id => document.getElementById(id);
+$('theta').oninput = e => { state.theta = +e.target.value; $('thv').textContent = state.theta; rebuildSweep(); };
+$('play').onclick = () => {
+  if (state.theta >= 360) state.theta = 0;
+  state.playing = !state.playing;
+  $('play').textContent = state.playing ? '❚❚ 停止' : '▶ 回転アニメ';
+};
+$('reset').onclick = () => {
+  state.playing = false; $('play').textContent = '▶ 回転アニメ';
+  state.theta = 0; $('theta').value = 0; $('thv').textContent = 0; rebuildSweep();
+};
+for (const id of ['showK', 'showKx', 'showKy', 'showI', 'showSec']) {
+  $(id).onchange = e => {
+    state[id] = e.target.checked;
+    gK.visible = state.showK; gI.visible = state.showI;
+    if (gKx) gKx.visible = state.showKx;
+    if (gKy) gKy.visible = state.showKy;
+    rebuildSec();
+  };
+}
+$('op').oninput = e => {
+  const o = e.target.value / 100;
+  for (const m of [matKx, matKy]) { m.opacity = o; m.depthWrite = o >= 1; m.transparent = o < 1; m.needsUpdate = true; }
+};
+$('t').oninput = e => { state.t = e.target.value / 100; $('tv').textContent = state.t.toFixed(2); rebuildSec(); };
+$('vu').innerHTML = tex((2 * Math.PI - 4 / 3).toFixed(4));
+
+rebuildSweep();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+(function animate() {
+  requestAnimationFrame(animate);
+  if (state.playing) {
+    state.theta = Math.min(360, state.theta + 1.5);
+    $('theta').value = state.theta; $('thv').textContent = Math.round(state.theta);
+    rebuildSweep();
+    if (state.theta >= 360) { state.playing = false; $('play').textContent = '▶ 回転アニメ'; }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>
